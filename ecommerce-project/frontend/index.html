@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vista Utente - E-Commerce</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>E-Commerce - Vista Utente</h1>
+    <nav>
+      <a href="index.html">Utente</a>
+      <a href="admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Seleziona Utente</h2>
+      <select id="userSelect"></select>
+      <p><strong>Crediti disponibili:</strong> <span id="userCredits">-</span></p>
+    </section>
+
+    <section class="card">
+      <h2>Catalogo Prodotti</h2>
+      <div id="productsContainer" class="grid"></div>
+    </section>
+
+    <section class="card">
+      <h2>Messaggi</h2>
+      <p id="message"></p>
+    </section>
+  </main>
+
+  <script src="user.js"></script>
+</body>
+</html>

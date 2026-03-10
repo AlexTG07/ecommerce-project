@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vista Admin - E-Commerce</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>E-Commerce - Vista Admin</h1>
+    <nav>
+      <a href="index.html">Utente</a>
+      <a href="admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Aggiungi Prodotto</h2>
+      <form id="addProductForm">
+        <input type="text" id="productName" placeholder="Nome prodotto" required />
+        <input type="number" id="productPrice" placeholder="Prezzo" required />
+        <input type="number" id="productStock" placeholder="Stock" required />
+        <button type="submit">Aggiungi</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Modifica Stock Prodotto</h2>
+      <form id="updateStockForm">
+        <select id="stockProductSelect"></select>
+        <input type="number" id="newStock" placeholder="Nuovo stock" required />
+        <button type="submit">Aggiorna stock</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Aggiungi Crediti Utente</h2>
+      <form id="addCreditsForm">
+        <select id="creditsUserSelect"></select>
+        <input type="number" id="creditsAmount" placeholder="Crediti bonus" required />
+        <button type="submit">Aggiungi crediti</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Stato Attuale</h2>
+      <div class="admin-panels">
+        <div>
+          <h3>Utenti</h3>
+          <ul id="usersList"></ul>
+        </div>
+        <div>
+          <h3>Prodotti</h3>
+          <ul id="productsList"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Messaggi</h2>
+      <p id="adminMessage"></p>
+    </section>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>

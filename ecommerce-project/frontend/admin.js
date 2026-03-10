@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:3000";
+const API_BASE = "https://ecommerce-project-he8a.onrender.com";
 
 const addProductForm = document.getElementById("addProductForm");
 const updateStockForm = document.getElementById("updateStockForm");

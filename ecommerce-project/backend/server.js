@@ -18,269 +18,86 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-
-
-app.get("/", (req, res) => {
-  res.json({ message: "Backend e-commerce con Supabase attivo" });
-});
-
 // =========================
-// USERS
+// MIDDLEWARE DI SICUREZZA (JWT)
 // =========================
 
-// Tutti gli utenti
-app.get("/api/users", async (req, res) => {
+// Protegge le rotte Admin
+const authenticateAdmin = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ error: "Accesso negato. Token mancante." });
+
   try {
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .order("id", { ascending: true });
-
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'admin') {
+      return res.status(403).json({ error: "Non sei autorizzato. Solo admin." });
     }
-
-    res.json(data);
+    next(); 
   } catch (err) {
-    res.status(500).json({ error: "Errore lettura utenti" });
+    res.status(403).json({ error: "Token admin non valido o scaduto." });
+  }
+};
+
+// Protegge le rotte Utente (es. acquisti)
+const authenticateUser = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ error: "Accesso negato. Effettua il login." });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded; // Salviamo i dati decodificati nella request
+    next(); 
+  } catch (err) {
+    res.status(403).json({ error: "Token utente non valido o scaduto." });
+  }
+};
+
+// =========================
+// ROTTE DI AUTENTICAZIONE
+// =========================
+
+// Login Admin
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body;
+
+  if (username === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
+    const token = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    res.json({ message: "Accesso consentito", token });
+  } else {
+    res.status(401).json({ error: "Credenziali amministratore errate" });
   }
 });
 
-// Utente per id
-app.get("/api/users/:id", async (req, res) => {
+// Registrazione Utente
+app.post('/api/register', async (req, res) => {
+  const { name, password } = req.body;
+  
+  if (!name || !password) return res.status(400).json({ error: "Nome e password sono obbligatori" });
+
   try {
-    const userId = Number(req.params.id);
-
-    if (!Number.isInteger(userId)) {
-      return res.status(400).json({ error: "ID utente non valido" });
-    }
-
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", userId)
-      .single();
-
-    if (error && error.code !== "PGRST116") {
-      return res.status(500).json({ error: error.message });
-    }
-
-    if (!data) {
-      return res.status(404).json({ error: "Utente non trovato" });
-    }
-
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Errore recupero utente" });
-  }
-});
-
-// Aggiunta crediti bonus
-app.patch("/api/users/:id/credits", async (req, res) => {
-  try {
-    const userId = Number(req.params.id);
-    const { amount } = req.body;
-
-    if (!Number.isInteger(userId)) {
-      return res.status(400).json({ error: "ID utente non valido" });
-    }
-
-    if (typeof amount !== "number" || amount <= 0) {
-      return res.status(400).json({ error: "Amount non valido" });
-    }
-
-    const { data: user, error: userError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", userId)
-      .single();
-
-    if (userError && userError.code !== "PGRST116") {
-      return res.status(500).json({ error: userError.message });
-    }
-
-    if (!user) {
-      return res.status(404).json({ error: "Utente non trovato" });
-    }
-
-    const newCredits = user.credits + amount;
-
-    const { data: updatedUser, error: updateError } = await supabase
-      .from("users")
-      .update({ credits: newCredits })
-      .eq("id", userId)
-      .select()
-      .single();
-
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message });
-    }
-
-    res.json({
-      message: "Crediti aggiornati con successo",
-      user: updatedUser
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Errore aggiornamento crediti" });
-  }
-});
-
-// =========================
-// PRODUCTS
-// =========================
-
-// Tutti i prodotti
-app.get("/api/products", async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("id", { ascending: true });
-
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
-
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Errore lettura prodotti" });
-  }
-});
-
-// Aggiunta nuovo prodotto
-app.post("/api/products", async (req, res) => {
-  try {
-    const { name, price, stock } = req.body;
-
-    if (!name || typeof name !== "string" || name.trim() === "") {
-      return res.status(400).json({ error: "Nome prodotto non valido" });
-    }
-
-    if (typeof price !== "number" || price <= 0) {
-      return res.status(400).json({ error: "Prezzo non valido" });
-    }
-
-    if (!Number.isInteger(stock) || stock < 0) {
-      return res.status(400).json({ error: "Stock non valido" });
-    }
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
     const { data, error } = await supabase
-      .from("products")
-      .insert([
-        {
-          name: name.trim(),
-          price,
-          stock
-        }
-      ])
-      .select()
-      .single();
+      .from('users')
+      .insert([{ name: name, password: hashedPassword, credits: 0 }])
+      .select();
 
     if (error) {
-      return res.status(500).json({ error: error.message });
+      if (error.code === '23505') return res.status(400).json({ error: "Nome utente già in uso" });
+      throw error;
     }
-
-    res.status(201).json({
-      message: "Prodotto aggiunto con successo",
-      product: data
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Errore creazione prodotto" });
+    res.status(201).json({ message: "Registrazione completata con successo!" });
+  } catch (error) {
+    res.status(500).json({ error: "Errore interno del server" });
   }
 });
 
-// Modifica stock prodotto
-app.patch("/api/products/:id/stock", async (req, res) => {
-  try {
-    const productId = Number(req.params.id);
-    const { stock } = req.body;
-
-    if (!Number.isInteger(productId)) {
-      return res.status(400).json({ error: "ID prodotto non valido" });
-    }
-
-    if (!Number.isInteger(stock) || stock < 0) {
-      return res.status(400).json({ error: "Stock non valido" });
-    }
-
-    const { data: product, error: findError } = await supabase
-      .from("products")
-      .select("*")
-      .eq("id", productId)
-      .single();
-
-    if (findError && findError.code !== "PGRST116") {
-      return res.status(500).json({ error: findError.message });
-    }
-
-    if (!product) {
-      return res.status(404).json({ error: "Prodotto non trovato" });
-    }
-
-    const { data: updatedProduct, error: updateError } = await supabase
-      .from("products")
-      .update({ stock })
-      .eq("id", productId)
-      .select()
-      .single();
-
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message });
-    }
-
-    res.json({
-      message: "Stock aggiornato con successo",
-      product: updatedProduct
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Errore aggiornamento stock" });
-  }
-});
-
-// =========================
-// PURCHASE
-// =========================
-
-app.post("/api/purchase", async (req, res) => {
-  try {
-    const { userId, productId } = req.body;
-
-    if (!Number.isInteger(userId) || !Number.isInteger(productId)) {
-      return res.status(400).json({ error: "userId o productId non validi" });
-    }
-
-    const { data, error } = await supabase.rpc("purchase_product", {
-      p_user_id: userId,
-      p_product_id: productId
-    });
-
-    if (error) {
-      const msg = error.message || "Errore durante l'acquisto";
-
-      if (
-        msg.includes("Utente non trovato") ||
-        msg.includes("Prodotto non trovato")
-      ) {
-        return res.status(404).json({ error: msg });
-      }
-
-      if (
-        msg.includes("Prodotto esaurito") ||
-        msg.includes("Crediti insufficienti")
-      ) {
-        return res.status(409).json({ error: msg });
-      }
-
-      return res.status(500).json({ error: msg });
-    }
-
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Errore durante l'acquisto" });
-  }
-});
-
-// --- ROTTA DI LOGIN (Modificata per restituire il Token) ---
+// Login Utente
 app.post('/api/login', async (req, res) => {
   const { name, password } = req.body;
 
@@ -293,14 +110,11 @@ app.post('/api/login', async (req, res) => {
 
     const user = users[0];
     const validPassword = await bcrypt.compare(password, user.password);
+    
     if (!validPassword) return res.status(401).json({ error: "Password errata" });
 
-    // Creazione del Token JWT valido per 24 ore
-    const token = jwt.sign(
-      { id: user.id, name: user.name }, 
-      process.env.JWT_SECRET || 'segreto_di_backup', 
-      { expiresIn: '24h' }
-    );
+    // Crea Token JWT
+    const token = jwt.sign({ id: user.id, name: user.name }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
     delete user.password;
     res.status(200).json({ message: "Login effettuato", user: user, token: token });
@@ -309,25 +123,127 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// --- NUOVA ROTTA: Verifica utente loggato (/api/me) ---
-// Questa rotta viene chiamata dal frontend al caricamento della pagina per ripristinare la sessione
-app.get('/api/me', async (req, res) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Formato: "Bearer TOKEN"
-
-  if (!token) return res.status(401).json({ error: "Nessun token fornito" });
-
+// Verifica sessione utente
+app.get('/api/me', authenticateUser, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'segreto_di_backup');
-    
-    // Recupera i dati aggiornati dell'utente (es. i crediti)
-    const { data: user, error } = await supabase.from('users').select('*').eq('id', decoded.id).single();
+    const { data: user, error } = await supabase.from('users').select('*').eq('id', req.user.id).single();
     if (error || !user) throw new Error("Utente non trovato");
 
     delete user.password;
     res.json({ user });
   } catch (err) {
-    res.status(403).json({ error: "Token non valido o scaduto" });
+    res.status(403).json({ error: "Errore recupero utente" });
+  }
+});
+
+
+// =========================
+// ROTTE ADMIN (Protette)
+// =========================
+
+app.get("/api/users", authenticateAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("users").select("id, name, credits").order("id", { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Errore lettura utenti" });
+  }
+});
+
+app.patch("/api/users/:id/credits", authenticateAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const { amount } = req.body;
+
+    if (!Number.isInteger(userId) || typeof amount !== "number" || amount <= 0) {
+      return res.status(400).json({ error: "Dati non validi" });
+    }
+
+    const { data: user, error: userError } = await supabase.from("users").select("*").eq("id", userId).single();
+    if (userError || !user) return res.status(404).json({ error: "Utente non trovato" });
+
+    const newCredits = user.credits + amount;
+    const { data: updatedUser, error: updateError } = await supabase.from("users").update({ credits: newCredits }).eq("id", userId).select().single();
+    if (updateError) return res.status(500).json({ error: updateError.message });
+
+    res.json({ message: "Crediti aggiornati con successo", user: updatedUser });
+  } catch (err) {
+    res.status(500).json({ error: "Errore aggiornamento crediti" });
+  }
+});
+
+app.post("/api/products", authenticateAdmin, async (req, res) => {
+  try {
+    const { name, price, stock } = req.body;
+
+    if (!name || typeof price !== "number" || price <= 0 || !Number.isInteger(stock) || stock < 0) {
+      return res.status(400).json({ error: "Dati prodotto non validi" });
+    }
+
+    const { data, error } = await supabase.from("products").insert([{ name: name.trim(), price, stock }]).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.status(201).json({ message: "Prodotto aggiunto", product: data });
+  } catch (err) {
+    res.status(500).json({ error: "Errore creazione prodotto" });
+  }
+});
+
+app.patch("/api/products/:id/stock", authenticateAdmin, async (req, res) => {
+  try {
+    const productId = Number(req.params.id);
+    const { stock } = req.body;
+
+    if (!Number.isInteger(productId) || !Number.isInteger(stock) || stock < 0) {
+      return res.status(400).json({ error: "Dati non validi" });
+    }
+
+    const { data: updatedProduct, error } = await supabase.from("products").update({ stock }).eq("id", productId).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ message: "Stock aggiornato", product: updatedProduct });
+  } catch (err) {
+    res.status(500).json({ error: "Errore aggiornamento stock" });
+  }
+});
+
+
+// =========================
+// ROTTE PUBBLICHE E ACQUISTI
+// =========================
+
+app.get("/api/products", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("products").select("*").order("id", { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Errore lettura prodotti" });
+  }
+});
+
+// Rotta acquisto protetta dal token Utente
+app.post("/api/purchase", authenticateUser, async (req, res) => {
+  try {
+    const { productId } = req.body;
+    const userId = req.user.id; // Lo prendiamo dal token in modo sicuro!
+
+    if (!Number.isInteger(productId)) return res.status(400).json({ error: "productId non valido" });
+
+    const { data, error } = await supabase.rpc("purchase_product", {
+      p_user_id: userId,
+      p_product_id: productId
+    });
+
+    if (error) {
+      const msg = error.message || "Errore durante l'acquisto";
+      return res.status(400).json({ error: msg });
+    }
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Errore durante l'acquisto" });
   }
 });
 

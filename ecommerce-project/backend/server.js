@@ -3,6 +3,7 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const { createClient } = require("@supabase/supabase-js");
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 dotenv.config();
 
@@ -279,74 +280,54 @@ app.post("/api/purchase", async (req, res) => {
   }
 });
 
-// --- ROTTA DI REGISTRAZIONE ---
-app.post('/api/register', async (req, res) => {
+// --- ROTTA DI LOGIN (Modificata per restituire il Token) ---
+app.post('/api/login', async (req, res) => {
   const { name, password } = req.body;
-  
-  if (!name || !password) {
-    return res.status(400).json({ error: "Nome e password sono obbligatori" });
-  }
+
+  if (!name || !password) return res.status(400).json({ error: "Nome e password sono obbligatori" });
 
   try {
-    // 1. Cripta la password (crea l'hash)
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const { data: users, error } = await supabase.from('users').select('*').eq('name', name);
+    if (error) throw error;
+    if (users.length === 0) return res.status(404).json({ error: "Utente non trovato" });
 
-    // 2. Salva l'utente nel database con la password criptata
-    const { data, error } = await supabase
-      .from('users')
-      .insert([{ name: name, password: hashedPassword, credits: 0 }]) // Credits iniziali a 0
-      .select();
+    const user = users[0];
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(401).json({ error: "Password errata" });
 
-    if (error) {
-      // Codice 23505 è l'errore di violazione "unique" se il nome esiste già (se hai impostato il nome come univoco in Supabase)
-      if (error.code === '23505') return res.status(400).json({ error: "Nome utente già in uso" });
-      throw error;
-    }
+    // Creazione del Token JWT valido per 24 ore
+    const token = jwt.sign(
+      { id: user.id, name: user.name }, 
+      process.env.JWT_SECRET || 'segreto_di_backup', 
+      { expiresIn: '24h' }
+    );
 
-    res.status(201).json({ message: "Registrazione completata con successo!" });
+    delete user.password;
+    res.status(200).json({ message: "Login effettuato", user: user, token: token });
   } catch (error) {
     res.status(500).json({ error: "Errore interno del server" });
   }
 });
 
-// --- ROTTA DI LOGIN ---
-app.post('/api/login', async (req, res) => {
-  const { name, password } = req.body;
+// --- NUOVA ROTTA: Verifica utente loggato (/api/me) ---
+// Questa rotta viene chiamata dal frontend al caricamento della pagina per ripristinare la sessione
+app.get('/api/me', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Formato: "Bearer TOKEN"
 
-  if (!name || !password) {
-    return res.status(400).json({ error: "Nome e password sono obbligatori" });
-  }
+  if (!token) return res.status(401).json({ error: "Nessun token fornito" });
 
   try {
-    // 1. Cerca l'utente nel database tramite il nome
-    const { data: users, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('name', name);
-
-    if (error) throw error;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'segreto_di_backup');
     
-    // 2. Se l'utente non esiste
-    if (users.length === 0) {
-      return res.status(404).json({ error: "Utente non trovato" });
-    }
+    // Recupera i dati aggiornati dell'utente (es. i crediti)
+    const { data: user, error } = await supabase.from('users').select('*').eq('id', decoded.id).single();
+    if (error || !user) throw new Error("Utente non trovato");
 
-    const user = users[0];
-
-    // 3. Confronta la password inserita con l'hash salvato nel database
-    const validPassword = await bcrypt.compare(password, user.password);
-    
-    if (!validPassword) {
-      return res.status(401).json({ error: "Password errata" });
-    }
-
-    // 4. Se è tutto ok, restituiamo l'utente (Rimuoviamo prima la password per sicurezza!)
     delete user.password;
-    res.status(200).json({ message: "Login effettuato", user: user });
-
-  } catch (error) {
-    res.status(500).json({ error: "Errore interno del server" });
+    res.json({ user });
+  } catch (err) {
+    res.status(403).json({ error: "Token non valido o scaduto" });
   }
 });
 
